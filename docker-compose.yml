@@ -1,0 +1,89 @@
+# MongoDB Log Anomaly & Security Monitor - Docker Compose
+# SmartBridge MongoDB Hackathon
+#
+# Orchestrates: RabbitMQ, MongoDB (local), Backend, AI Producer, AI Detector
+# For MongoDB Atlas: set MONGODB_URI in .env and omit mongodb service
+# Run frontend separately: cd frontend && npm run dev
+
+services:
+  mongodb:
+    image: mongo:7
+    container_name: mongodb-monitor-db
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: mongodb-monitor-rabbitmq
+    ports:
+      - "5672:5672"   # AMQP
+      - "15672:15672" # Management UI
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: mongodb-monitor-backend
+    ports:
+      - "3001:3001"
+    environment:
+      PORT: 3001
+      MONGODB_URI: ${MONGODB_URI:-mongodb://mongodb:27017/log_monitor}
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:5173}
+    depends_on:
+      mongodb:
+        condition: service_started
+      rabbitmq:
+        condition: service_healthy
+
+  ai-producer:
+    build:
+      context: ./ai_engine
+      dockerfile: Dockerfile
+    container_name: mongodb-monitor-producer
+    command: ["python", "producer.py"]
+    environment:
+      PYTHONUNBUFFERED: 1
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_QUEUE: mongodb_logs
+      RABBITMQ_USER: guest
+      RABBITMQ_PASS: guest
+      PRODUCER_INTERVAL: 2
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+
+  ai-detector:
+    build:
+      context: ./ai_engine
+      dockerfile: Dockerfile
+    container_name: mongodb-monitor-detector
+    command: ["python", "detector.py"]
+    environment:
+      PYTHONUNBUFFERED: 1
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_QUEUE: mongodb_logs
+      RABBITMQ_USER: guest
+      RABBITMQ_PASS: guest
+      BACKEND_URL: http://backend:3001
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      backend:
+        condition: service_started
+    restart: on-failure
+
+volumes:
+  mongodb_data:

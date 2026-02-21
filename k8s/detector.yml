@@ -1,0 +1,23 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ai-detector
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ai-detector
+  template:
+    metadata:
+      labels:
+        app: ai-detector
+    spec:
+      containers:
+        - name: detector
+          image: mongodb-log-monitor-ai-detector:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: RABBITMQ_HOST
+              value: "rabbitmq-service"
+            - name: BACKEND_URL
+              value: "http://backend-service:3001"
